@@ -10,7 +10,7 @@ import numpy as np
 st.set_page_config(page_title="Painel de Votação - Curitiba", layout="wide")
 
 # 2. Título do painel
-st.title("Análise de Votação para Prefeitura de Curitiba - Primeiro Turno")
+st.title("Dados de Votação para Prefeitura de Curitiba - Primeiro Turno")
 
 # 3. Carregamento dos dados
 @st.cache_data
@@ -47,15 +47,9 @@ df = load_data(votes_csv, geojson_file)
 # 4. Filtros na Barra Lateral
 st.sidebar.header("Filtros")
 
-# Filtro por Zona Eleitoral
-zonas = sorted(df['zona_eleitoral'].unique())
-zona_selecionada = st.sidebar.multiselect(
-    "Selecione a(s) Zona(s) Eleitoral(is):", options=zonas, default=zonas
-)
-
 # Filtro de Tipo de Voto (Quantidades e Candidatos)
 opcoes_votos = [
-    'VOTOS APTOS', 'ABSTENÇÕES', 'VOTOS NOMINAIS', 'VOTO BRANCO', 'VOTO NULO',
+    'VOTOS APTOS','ABSTENÇÕES','VOTOS NOMINAIS', 'VOTO BRANCO', 'VOTO NULO',
     'CRISTINA REIS GRAEML', 'EDUARDO PIMENTEL SLAVIERO', 'FELIPE GUSTAVO BOMBARDELLI',
     'LUCIANO DUCCI', 'LUIZ GOULARTE ALVES', 'MARIA VICTORIA BORGHETTI BARROS',
     'NEY LEPREVOST NETO', 'ROBERTO REQUIÃO DE MELLO E SILVA', 'SAMUEL DE MATTOS FIGUEIREDO'
@@ -68,13 +62,25 @@ modo_visualizacao = st.sidebar.radio(
     options=["Números Absolutos", "Proporção (%)"]
 )
 
+# Filtro por Zona Eleitoral
+zonas = sorted(df['zona_eleitoral'].unique())
+zona_selecionada = st.sidebar.multiselect(
+    "Selecione a(s) Zona(s) Eleitoral(is):", options=zonas, default=zonas
+)
+
+# Filtro por Bairro
+bairros = sorted(df['BAIRRO'].unique())
+bairro_selecionado = st.sidebar.multiselect(
+    "Selecione o(s) Bairro(s):", options=bairros, default=bairros
+)
+
 # Dicionário de cores por tipo de voto/candidato
 cores_votos = {
     'VOTOS APTOS': [34, 139, 34],  # Verde
     'ABSTENÇÕES': [255, 0, 0],  # Vermelho
     'VOTOS NOMINAIS': [0, 0, 255],  # Azul
-    'VOTO BRANCO': [255, 255, 255],  # Branco
-    'VOTO NULO': [100, 100, 100],  # Preto
+    'VOTO BRANCO': [220, 220, 220],  # Cinza claro
+    'VOTO NULO': [128, 128, 128],  # Cinza
     'CRISTINA REIS GRAEML': [128, 0, 128],  # Roxo
     'EDUARDO PIMENTEL SLAVIERO': [255, 165, 0],  # Laranja
     'FELIPE GUSTAVO BOMBARDELLI': [155, 50, 100],
@@ -92,133 +98,233 @@ cor_selecionada = cores_votos.get(voto_selecionado, [0, 128, 255])  # Default Az
 
 # 5. Aplicação dos Filtros nos Dados
 df_filtrado = df[df['zona_eleitoral'].isin(zona_selecionada)]
+df_filtrado = df_filtrado[df_filtrado['BAIRRO'].isin(bairro_selecionado)]
 
 # Aplicar lógica para proporção ou absoluto
 if modo_visualizacao == "Proporção (%)":
     # Evitar divisão por zero
-    df_filtrado['valor_exibido'] = np.where(
+    valor_exibido = voto_selecionado + " (%)" 
+    df_filtrado[valor_exibido] = np.where(
         df_filtrado['VOTOS APTOS'] > 0,
-        (df_filtrado[voto_selecionado] / df_filtrado['VOTOS APTOS']) * 100,
+        round((df_filtrado[voto_selecionado] / df_filtrado['VOTOS APTOS']) * 100, 1),
         0
     )
-    titulo_valor = "Proporção (%)"
+    titulo_valor = "Proporção em Relação aos Votos Aptos"
+    # Remover possíveis valores negativos ou NaN
+    df_filtrado[valor_exibido] = df_filtrado[valor_exibido].fillna(0)
 else:
-    df_filtrado['valor_exibido'] = df_filtrado[voto_selecionado]
-    titulo_valor = "Quantidade de Votos"
+    valor_exibido = voto_selecionado
+    df_filtrado[valor_exibido] = df_filtrado[voto_selecionado].fillna(0)
+    titulo_valor = "Quantidade de " + voto_selecionado
 
-# Remover possíveis valores negativos ou NaN
-df_filtrado['valor_exibido'] = df_filtrado['valor_exibido'].fillna(0)
-
-# 6. Implementação da Escala Automática para Radius
-def calcular_radius(series, min_radius=5, max_radius=50):
+# 6. Implementação da Escala Automática para Radius com Legenda Integrada
+def calcular_radius(series, min_radius=200, max_radius=550):
     min_val = series.min()
     max_val = series.max()
     if max_val == min_val:
         return [min_radius for _ in series]
     else:
-        # Escala linear
-        return min_radius + (series - min_val) / (max_val - min_val) * (max_radius - min_radius)
+        # Aplicar uma transformação logarítmica para melhor distribuição
+        transformed = np.log1p(series)
+        min_val = transformed.min()
+        max_val = transformed.max()
+        return 200 + (transformed - min_val) / (max_val - min_val) * (550 - 200)
 
-# Calcular o radius automaticamente
-df_filtrado['radius'] = calcular_radius(df_filtrado['valor_exibido'])
+# Definir os intervalos (bins) para valor_exibido
+if (valor_exibido == 'VOTOS APTOS (%)'):
+    num_bins = 1  # Número de categorias para a legenda
+else:
+    num_bins = 5  # Número de categorias para a legenda
+bins = np.linspace(0.01, df_filtrado[valor_exibido].max(), num_bins + 1)
+labels = [f"{round(bins[i],2)} - {round(bins[i+1],2)}" for i in range(num_bins)]
+df_filtrado['bin'] = pd.cut(df_filtrado[valor_exibido], bins=bins, labels=labels, include_lowest=True)
+
+# Definir um mapeamento de bins para tamanhos de bolinhas
+radius_mapping = {
+    label: size for label, size in zip(labels, np.linspace(150, 1100, num_bins))
+}
+radius_mapping_leg = {
+    label: size for label, size in zip(labels, np.linspace(5, 30, num_bins))
+}
+# Atribuir o tamanho da bolinha com base no bin
+df_filtrado['radius'] = df_filtrado['bin'].map(radius_mapping)
+
+# Função para gerar a legenda de tamanho das bolinhas
+def gerar_legenda_tamanho(radius_mapping):
+    legenda_html = "<div style='margin-top:10px;'>"
+    legenda_html += "<h4>Legenda do Tamanho das Bolinhas</h4>"
+    for label, size in radius_mapping.items():
+        legenda_html += f"""
+        <div style="display: flex; align-items: center; margin-bottom:5px;">
+            <div style="
+                width: {size}px;
+                height: {size}px;
+                background-color: rgba(0, 128, 255, 0.7);
+                border: 1px solid #000;
+                border-radius: 50%;
+                margin-right: 10px;
+            "></div>
+            <div>{label}</div>
+        </div>
+        """
+    legenda_html += "</div>"
+    return legenda_html
+
+# Gerar a legenda de tamanho das bolinhas
+legenda_tamanho = gerar_legenda_tamanho(radius_mapping_leg)
 
 # 7. Criação dos Gráficos
-# Gráfico de Barras
-grafico_barras = alt.Chart(df_filtrado).mark_bar().encode(
-    x=alt.X('zona_eleitoral:N', title="Zona Eleitoral"),
-    y=alt.Y('valor_exibido', title=titulo_valor),
-    color='zona_eleitoral:N',
-    tooltip=['zona_eleitoral', 'local_votacao', 'valor_exibido']
-).properties(
-    width=600,
-    height=400
-)
+def criar_graficos(df, valor_exibido, titulo_valor):
+    # Gráfico de Barras
+    grafico_barras = alt.Chart(df).mark_bar().encode(
+        x=alt.X('BAIRRO:N', title="Bairro"),
+        y=alt.Y(valor_exibido, title=titulo_valor),
+        color=alt.Color('BAIRRO:N', legend=None),
+        tooltip=['zona_eleitoral', 'local_votacao', 'BAIRRO', valor_exibido]
+    ).properties(
+        width=600,
+        height=400
+    ).configure_axis(
+        labelFontSize=12,
+        titleFontSize=14
+    ).configure_title(
+        fontSize=16
+    )
+    
+    # Gráfico de Pizza
+    grafico_pizza = px.pie(
+        df, 
+        values=valor_exibido, 
+        names='BAIRRO', 
+        title=f"Distribuição de {titulo_valor} por Bairro",
+        color_discrete_sequence=px.colors.qualitative.Pastel
+    )
+    
+    return grafico_barras, grafico_pizza
 
-# Gráfico de Pizza
-grafico_pizza = px.pie(
-    df_filtrado, 
-    values='valor_exibido', 
-    names='zona_eleitoral', 
-    title=f"Distribuição de {voto_selecionado} por Zona Eleitoral",
-    color_discrete_sequence=px.colors.qualitative.Pastel
-)
+# Criar os gráficos
+grafico_barras, grafico_pizza = criar_graficos(df_filtrado, valor_exibido, titulo_valor)
 
 # 8. Verificar se há pontos disponíveis
 if df_filtrado.empty:
     st.warning("Nenhum dado encontrado para os filtros selecionados.")
 else:
-    # 9. Organizar o Layout em Colunas
-    col1, col2 = st.columns(2)
+    # 9. Organizar o Layout em Containers e Colunas
+    st.header("Visualizações Interativas")
     
-    with col1:
-        st.subheader("Distribuição dos Votos por Zona Eleitoral")
+    # Container para Indicadores Principais
+    with st.container():
+        st.markdown("### Indicadores Principais")
+        total_votos = df_filtrado[voto_selecionado].sum()
+        total_aptos = df_filtrado['VOTOS APTOS'].sum()
+        percentual_total = (total_votos / total_aptos * 100) if total_aptos > 0 else 0
+        
+        col1, col2, col3 = st.columns(3)
+        
+        col1.metric("Total de Votos", f"{total_votos}")
+        if modo_visualizacao == "Proporção (%)":
+            col2.metric("Proporção Total (%)", f"{percentual_total:.2f}%")
+        col3.metric("Votos Aptos", f"{total_aptos}")
+    
+    # Container para Mapas e Tabelas
+    with st.container():
+        col1, col2 = st.columns([2, 1])  # Mapa ocupa mais espaço que a tabela
+        with col1:
+            # 10. Criação do Mapa Interativo
+            st.subheader("Mapa das Localidades de Votação")
+            
+            # Extrair coordenadas X e Y da geometria
+            df_filtrado = df_filtrado.copy()  # Evita SettingWithCopyWarning
+            df_filtrado['lon'] = df_filtrado.geometry.x
+            df_filtrado['lat'] = df_filtrado.geometry.y
+            
+            # Garantir que a coluna selecionada existe e é numérica
+            if voto_selecionado not in df_filtrado.columns:
+                st.error(f"A coluna '{voto_selecionado}' não existe nos dados.")
+            elif not pd.api.types.is_numeric_dtype(df_filtrado[voto_selecionado]):
+                st.error(f"A coluna '{voto_selecionado}' não é numérica.")
+            else:
+                # Definir a camada do mapa
+                layer = pdk.Layer(
+                    "ScatterplotLayer",
+                    data=df_filtrado,
+                    get_position='[lon, lat]',
+                    get_fill_color=cor_selecionada + [180],  # Adicionar transparência
+                    get_line_color=[0, 0, 0],  # Bordas pretas
+                    line_width_min_pixels=1,
+                    get_radius="radius",
+                    pickable=True,
+                    auto_highlight=True
+                )
+            
+                # Configuração do estado inicial do mapa com zoom fixo
+                if not df_filtrado.empty:
+                    midpoint = (df_filtrado['lon'].mean(), df_filtrado['lat'].mean())
+                else:
+                    midpoint = (-49.2733, -25.4284)  # Coordenadas de Curitiba
+            
+                view_state = pdk.ViewState(
+                    longitude=midpoint[0],
+                    latitude=midpoint[1],
+                    zoom=10,  # Zoom fixo para manter a proporcionalidade
+                    pitch=0
+                )
+            
+                # Renderização do mapa
+                r = pdk.Deck(
+                    layers=[layer],
+                    initial_view_state=view_state,
+                    tooltip={
+                        "html": f"Zona: {{zona_eleitoral}}<br/>Local: {{local_votacao}}<br/>{titulo_valor}: {{{valor_exibido}}}",
+                        "style": {"backgroundColor": "steelblue", "color": "white"}
+                    }
+                )
+            
+                st.pydeck_chart(r)
+        
+        with col2:
+            st.markdown("### Legenda")
+            # Legenda para o tipo de voto/candidato
+            legenda_cor = f"""
+            <div style="display: flex; align-items: center; margin-bottom:10px;">
+                <div style="
+                    width: 20px;
+                    height: 20px;
+                    background-color: rgba({cor_selecionada[0]}, {cor_selecionada[1]}, {cor_selecionada[2]}, 0.7);
+                    border: 1px solid #000;
+                    border-radius: 50%;
+                    margin-right: 10px;
+                "></div>
+                <div>{voto_selecionado}</div>
+            </div>
+            """
+            # Legenda para o tamanho das bolinhas
+            st.markdown(legenda_cor + legenda_tamanho, unsafe_allow_html=True)
+            
+            # Nota sobre o zoom fixo
+            st.markdown("""
+                <div style="margin-top:10px; font-size:12px;">
+                    <i>Nota: A legenda de tamanho das bolinhas é baseada no nível de zoom 11 do mapa.</i>
+                </div>
+            """, unsafe_allow_html=True)
+            
+    
+    # Container para Gráficos
+    with st.container():
+    #    col1 = st.columns(1)
+        
+    #    with col1:
+        st.subheader("Distribuição dos Votos por Bairro")
         st.altair_chart(grafico_barras, use_container_width=True)
+        
+        #with col2:
+        #    st.subheader("Proporção dos Votos por Bairro")
+        #    st.plotly_chart(grafico_pizza, use_container_width=True)
     
-    with col2:
-        st.subheader("Gráfico de Pizza")
-        st.plotly_chart(grafico_pizza, use_container_width=True)
-    
-    # 10. Adicionar a Legenda
-    st.markdown("### Legenda")
-    legend_html = f"""
-    <div style="display: flex; align-items: center;">
-        <div style="width: 20px; height: 20px; background-color: rgba({cor_selecionada[0]}, {cor_selecionada[1]}, {cor_selecionada[2]}, 0.7); border: 1px solid #000; margin-right: 10px;"></div>
-        <div>{voto_selecionado}</div>
-    </div>
-    """
-    st.markdown(legend_html, unsafe_allow_html=True)
-    
-    # 11. Criação do Mapa Interativo
-    st.subheader("Mapa das Localidades de Votação")
-    
-    # Extrair coordenadas X e Y da geometria
-    df_filtrado = df_filtrado.copy()  # Evita SettingWithCopyWarning
-    df_filtrado['lon'] = df_filtrado.geometry.x
-    df_filtrado['lat'] = df_filtrado.geometry.y
-    
-    # Garantir que a coluna selecionada existe e é numérica
-    if voto_selecionado not in df_filtrado.columns:
-        st.error(f"A coluna '{voto_selecionado}' não existe nos dados.")
-    elif not pd.api.types.is_numeric_dtype(df_filtrado[voto_selecionado]):
-        st.error(f"A coluna '{voto_selecionado}' não é numérica.")
-    else:
-        # Definir a camada do mapa
-        layer = pdk.Layer(
-            "ScatterplotLayer",
-            data=df_filtrado,
-            get_position='[lon, lat]',
-            get_fill_color=cor_selecionada + [180],  # Adicionar transparência
-            get_radius="radius",
-            pickable=True,
-            auto_highlight=True
-        )
-    
-        # Configuração do estado inicial do mapa
-        if not df_filtrado.empty:
-            midpoint = (df_filtrado['lon'].mean(), df_filtrado['lat'].mean())
-        else:
-            midpoint = (-49.2733, -25.4284)  # Coordenadas de Curitiba
-    
-        view_state = pdk.ViewState(
-            longitude=midpoint[0],
-            latitude=midpoint[1],
-            zoom=11,
-            pitch=0
-        )
-    
-        # Renderização do mapa
-        r = pdk.Deck(
-            layers=[layer],
-            initial_view_state=view_state,
-            tooltip={
-                "html": f"Zona: {{zona_eleitoral}}<br/>Local: {{local_votacao}}<br/>{titulo_valor}: {{valor_exibido}}",
-                "style": {"backgroundColor": "steelblue", "color": "white"}
-            }
-        )
-    
-        st.pydeck_chart(r)
-    
-    # 12. Tabela Dinâmica
-    st.subheader(f"Dados das Localidades de Votação - {titulo_valor}")
-    colunas_exibir = ['zon_loc', 'zona_eleitoral', 'local_votacao', 'valor_exibido']
-    st.dataframe(df_filtrado[colunas_exibir].reset_index(drop=True))
+    # Container para Legenda
+    with st.container():
+    # 11. Tabela Dinâmica
+        st.subheader(f"Dados das Localidades de Votação - {titulo_valor}")
+        colunas_exibir = ['zona_eleitoral', 'local_votacao', valor_exibido, 'BAIRRO']
+        st.dataframe(df_filtrado[colunas_exibir].reset_index(drop=True))
+        

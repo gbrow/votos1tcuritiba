@@ -74,140 +74,309 @@ bairro_selecionado = st.sidebar.multiselect(
     "Selecione o(s) Bairro(s):", options=bairros, default=bairros
 )
 
-# Dicionário de cores por tipo de voto/candidato
-cores_votos = {
-    'VOTOS APTOS': [34, 139, 34],  # Verde
-    'qt_abstencoes': [255, 0, 0],  # Vermelho
-    'qt_votos_nominais': [0, 0, 255],  # Azul
-    'VOTO BRANCO': [255, 255, 255],  # Branco
-    'VOTO NULO': [200, 200, 200],  # Cinza
-    'CRISTINA REIS GRAEML': [128, 0, 128],  # Roxo
-    'EDUARDO PIMENTEL SLAVIERO': [255, 165, 0],  # Laranja
-    'FELIPE GUSTAVO BOMBARDELLI': [155, 50, 100],
-    'LUCIANO DUCCI': [55, 65, 10], 
-    'LUIZ GOULARTE ALVES': [255, 65, 200], 
-    'MARIA VICTORIA BORGHETTI BARROS': [55, 5, 200],
-    'NEY LEPREVOST NETO': [155, 15, 90], 
-    'ROBERTO REQUIÃO DE MELLO E SILVA': [55, 120, 220], 
-    'SAMUEL DE MATTOS FIGUEIREDO': [5, 165, 60]
-    # Adicione cores para os demais candidatos...
-}
-
-# Obter a cor correspondente ao tipo de voto selecionado
-cor_selecionada = cores_votos.get(voto_selecionado, [0, 128, 255])  # Default Azul
-
 # 5. Aplicação dos Filtros nos Dados
 df_filtrado = df[df['zona_eleitoral'].isin(zona_selecionada)]
+df_filtrado = df_filtrado[df_filtrado['BAIRRO'].isin(bairro_selecionado)]
 
-df_filtrado = df[df['BAIRRO'].isin(bairro_selecionado)]
-
-# Aplicar lógica para proporção ou absoluto
+# 6. Aplicar lógica para proporção ou absoluto
 if modo_visualizacao == "Proporção (%)":
     # Evitar divisão por zero
-    valor_exibido = voto_selecionado+" (%)" 
+    valor_exibido = voto_selecionado + " (%)" 
     df_filtrado[valor_exibido] = np.where(
         df_filtrado['VOTOS APTOS'] > 0,
-        round((df_filtrado[voto_selecionado] / df_filtrado['VOTOS APTOS']) * 100,2),
+        round((df_filtrado[voto_selecionado] / df_filtrado['VOTOS APTOS']) * 100, 1),
         0
     )
-    titulo_valor = valor_exibido + "Proporção em relação aos votos aptos"
+    titulo_valor = "Proporção em Relação aos Votos Aptos"
     # Remover possíveis valores negativos ou NaN
     df_filtrado[valor_exibido] = df_filtrado[valor_exibido].fillna(0)
 else:
     valor_exibido = voto_selecionado
-    #df_filtrado['valor_exibido'] = df_filtrado[voto_selecionado]
+    df_filtrado[valor_exibido] = df_filtrado[voto_selecionado].fillna(0)
     titulo_valor = "Quantidade de " + voto_selecionado
 
+# 7. Implementação da Escala Automática para Radius com Legenda Integrada
+# Definir os intervalos (bins) para valor_exibido com verificação
+num_bins = 5  # Número de categorias para a legenda
 
+unique_vals = df_filtrado[valor_exibido].nunique()
 
-# 6. Implementação da Escala Automática para Radius
-def calcular_radius(series, min_radius=5, max_radius=50):
-    min_val = series.min()
-    max_val = series.max()
-    if max_val == min_val:
-        return [min_radius for _ in series]
-    else:
-        # Escala linear
-        return (min_radius + (series - min_val) / (max_val - min_val) * (max_radius - min_radius))
-
-if modo_visualizacao == "Proporção (%)":
-    fator_calc = 10
-    # Calcular o radius automaticamente
-    df_filtrado['radius'] = calcular_radius(df_filtrado[valor_exibido])*fator_calc
+if unique_vals > 1:
+    bins = np.linspace(df_filtrado[valor_exibido].min(), df_filtrado[valor_exibido].max(), num_bins + 1)
+    labels = [f"{round(bins[i],2)} - {round(bins[i+1],2)}" for i in range(num_bins)]
+    try:
+        df_filtrado['bin'] = pd.cut(df_filtrado[valor_exibido], bins=bins, labels=labels, include_lowest=True, duplicates='drop')
+    except ValueError:
+        # Caso ainda ocorram bins duplicados, definir manualmente
+        df_filtrado['bin'] = 'Valor Único'
+        labels = ['Valor Único']
 else:
-    fator_calc = 20
-    # Calcular o radius automaticamente
-    df_filtrado['radius'] = calcular_radius(df_filtrado[valor_exibido])*fator_calc
+    # Todos os valores são iguais; criar um único bin
+    bins = [df_filtrado[valor_exibido].min(), df_filtrado[valor_exibido].max()]
+    labels = [f"{df_filtrado[valor_exibido].min()}"]
+    df_filtrado['bin'] = pd.cut(df_filtrado[valor_exibido], bins=bins, labels=labels, include_lowest=True)
 
+if unique_vals > 1:
+    # Definir um mapeamento de bins para tamanhos de bolinhas
+    radius_mapping = {
+        label: size for label, size in zip(labels, np.linspace(150, 1100, len(labels)))
+    }
+    # Definir um mapeamento de bins para cores
+    paleta_cores = [
+        (0, 128, 255,220),      # Azul claro
+        (0, 100, 200,220),
+        (0, 80, 180,220),
+        (0, 60, 160,220),
+        (0, 40, 140,220)        # Azul escuro
+    ]
+    color_mapping = {
+        label: cor for label, cor in zip(labels, paleta_cores)
+    }
+else:
+    # Caso todos os valores sejam iguais, usar uma cor intermediária
+    radius_mapping = {labels[0]: 650}  # Média entre 200 e 550
+    paleta_cores = [
+        (0, 128, 255,200)      # Azul claro
+    ]
+    color_mapping = {labels[0]: (0, 128, 255,220)}  # Azul intermediário
 
+if isinstance(df_filtrado.index, pd.MultiIndex):
+    df_filtrado = df_filtrado.reset_index()  # Remove MultiIndex do DataFrame.
 
+df_filtrado['bin'] = df_filtrado['bin'].astype(str)
 
-# 7. Criação dos Gráficos
-# Gráfico de Barras
-grafico_barras = alt.Chart(df_filtrado).mark_bar().encode(
-    x=alt.X('BAIRRO:N', title="Bairro"),
-    y=alt.Y(voto_selecionado, title=titulo_valor),
-    color='BAIRRO:N',
-    tooltip=['zona_eleitoral', 'local_votacao','BAIRRO', voto_selecionado]
-).properties(
-    width=600,
-    height=400
-)
+# Atribuir o tamanho da bolinha com base no bin
+df_filtrado['radius'] = df_filtrado['bin'].map(radius_mapping)
 
-# Gráfico de Pizza
-grafico_pizza = px.pie(
-    df_filtrado, 
-    values=valor_exibido, 
-    names='BAIRRO', 
-    title=f"Distribuição de {valor_exibido} por Bairro",
-    color_discrete_sequence=px.colors.qualitative.Pastel
-)
+# Atribuir a cor com base no bin
+df_filtrado['color'] = df_filtrado['bin'].map(color_mapping)
 
-# 8. Verificar se há pontos disponíveis
+# Verificar se há alguma cor não mapeada e atribuir cor padrão
+if df_filtrado['color'].isnull().any():
+    df_filtrado['color'] = df_filtrado['color'].apply(lambda x: (0, 128, 255) if pd.isnull(x) else x)
+
+# 8. Funções para gerar legendas
+def gerar_legenda_tamanho(radius_mapping_leg):
+    legenda_html = "<div style='margin-top:10px;'>"
+    legenda_html += "<h4>Legenda do Tamanho das Bolinhas</h4>"
+    i = 0
+    for label, size in radius_mapping_leg.items():
+        legenda_html += f"""
+        <div style="display: flex; align-items: center; margin-bottom:5px;">
+            <div style="
+                width: {size}px;
+                height: {size}px;
+                background-color: rgba({paleta_cores[i][0]}, {paleta_cores[i][1]}, {paleta_cores[i][2]}, 0.8);
+                border: 1px solid #000;
+                border-radius: 50%;
+                margin-right: 10px;
+            "></div>
+            <div>{label}</div>
+        </div>
+        """
+        i+=1
+    legenda_html += "</div>"
+    return legenda_html
+
+def gerar_legenda_cores(color_mapping):
+    legenda_html = "<div style='margin-top:10px;'>"
+    legenda_html += "<h4>Legenda de Cores</h4>"
+    for label, cor in color_mapping.items():
+        legenda_html += f"""
+        <div style="display: flex; align-items: center; margin-bottom:5px;">
+            <div style="
+                width: 20px;
+                height: 20px;
+                background-color: rgba({cor[0]}, {cor[1]}, {cor[2]}, 0.7);
+                border: 1px solid #000;
+                margin-right: 10px;
+            "></div>
+            <div>{label}</div>
+        </div>
+        """
+    legenda_html += "</div>"
+    return legenda_html
+
+# Gerar a legenda de tamanho das bolinhas
+if unique_vals > 1:
+    radius_mapping_leg = {
+        label: size for label, size in zip(labels, np.linspace(5, 30, len(labels)))
+    }
+else:
+    radius_mapping_leg = {labels[0]: 15}  # Tamanho intermediário
+
+legenda_tamanho = gerar_legenda_tamanho(radius_mapping_leg)
+
+# Gerar a legenda de cores
+legenda_cores = gerar_legenda_cores(color_mapping)
+
+# 9. Criação dos Gráficos
+def criar_graficos(df, valor_exibido, titulo_valor, modo_visualizacao):
+    if modo_visualizacao == "Proporção (%)":
+        # Agregar somatório por bairro e calcular a proporção
+        df_agrupado = df.groupby('BAIRRO').agg({
+            voto_selecionado: 'sum',
+            'VOTOS APTOS': 'sum'
+        }).reset_index()
+        df_agrupado['Proporção (%)'] = (df_agrupado[voto_selecionado] / df_agrupado['VOTOS APTOS']) * 100
+        grafico_barras = alt.Chart(df_agrupado).mark_bar().encode(
+            x=alt.X('BAIRRO:N', title="Bairro"),
+            y=alt.Y('Proporção (%)', title="Proporção (%)"),
+            color=alt.Color('BAIRRO:N', legend=None),
+            tooltip=['BAIRRO', 'Proporção (%)']
+        ).properties(
+            width=600,
+            height=400,
+            title='Proporção de Votos por Bairro'
+        ).configure_axis(
+            labelFontSize=12,
+            titleFontSize=14
+        ).configure_title(
+            fontSize=16
+        )
+        
+        grafico_pizza = px.pie(
+            df_agrupado, 
+            values='Proporção (%)', 
+            names='BAIRRO', 
+            title=f"Distribuição de Proporção (%) por Bairro",
+            color_discrete_sequence=px.colors.qualitative.Pastel
+        )
+    else:
+        # Agregar somatório por bairro
+        df_agrupado = df.groupby('BAIRRO').agg({
+            voto_selecionado: 'sum'
+        }).reset_index()
+        grafico_barras = alt.Chart(df_agrupado).mark_bar().encode(
+            x=alt.X('BAIRRO:N', title="Bairro"),
+            y=alt.Y(voto_selecionado, title=titulo_valor),
+            color=alt.Color('BAIRRO:N', legend=None),
+            tooltip=['BAIRRO', voto_selecionado]
+        ).properties(
+            width=600,
+            height=400,
+            title='Quantidade de Votos por Bairro'
+        ).configure_axis(
+            labelFontSize=12,
+            titleFontSize=14
+        ).configure_title(
+            fontSize=16
+        )
+        
+        grafico_pizza = px.pie(
+            df_agrupado, 
+            values=voto_selecionado, 
+            names='BAIRRO', 
+            title=f"Distribuição de {titulo_valor} por Bairro",
+            color_discrete_sequence=px.colors.qualitative.Pastel
+        )
+    
+    return grafico_barras, grafico_pizza
+
+# Criar os gráficos de barra e pizza
+grafico_barras, grafico_pizza = criar_graficos(df_filtrado, valor_exibido, titulo_valor, modo_visualizacao)
+
+# 10. Adicionar Gráfico de Distribuição de Locais por Faixa de Valores
+def criar_grafico_distribuicao(df, valor_exibido):
+    # Definir as faixas (bins) e labels para distribuição
+    distrib_bins = bins # [0, 10, 25, 50, 75, 100]  # Ajuste conforme necessário
+    distrib_labels = labels #['0-10%', '10-25%', '25-50%', '50-75%', '75-100%']
+    
+    # Categorizar os dados
+    df['faixa_distribuicao'] = pd.cut(
+        df[valor_exibido], 
+        bins=distrib_bins, 
+        labels=distrib_labels, 
+        include_lowest=True
+    )
+    
+    # Contar o número de locais por faixa
+    df_distribuicao = df['faixa_distribuicao'].value_counts().reset_index()
+    df_distribuicao.columns = ['Faixa de Valores', 'Número de Locais']
+    #df_distribuicao = df_distribuicao.sort_values(by='Faixa de Valores')
+    
+    # Criar o gráfico de barras
+    grafico_distribuicao = alt.Chart(df_distribuicao).mark_bar().encode(
+        x=alt.X('Faixa de Valores:O', title='Faixa de Valores'),
+        y=alt.Y('Número de Locais:Q', title='Número de Locais'),
+        color=alt.Color('Faixa de Valores:O', legend=None),
+        tooltip=['Faixa de Valores', 'Número de Locais']
+    ).properties(
+        width=600,
+        height=400,
+        title='Distribuição de Locais de Votação por Faixa de Valores'
+    ).configure_axis(
+        labelFontSize=12,
+        titleFontSize=14
+    ).configure_title(
+        fontSize=16
+    )
+    
+    return grafico_distribuicao
+
+# Criar o gráfico de distribuição
+grafico_distribuicao = criar_grafico_distribuicao(df_filtrado, valor_exibido)
+
+# 11. Verificar se há pontos disponíveis
 if df_filtrado.empty:
     st.warning("Nenhum dado encontrado para os filtros selecionados.")
 else:
-    # 9. Organizar o Layout em Colunas
-    col1, col2 = st.columns(2)
+    # 12. Organizar o Layout em Containers e Colunas
+    st.header("Visualizações Interativas")
     
-    with col1:
-        # 10. Criação do Mapa Interativo
-        st.subheader("Mapa das Localidades de Votação")
+    # Container para Indicadores Principais
+    with st.container():
+        st.markdown("### Indicadores Principais")
+        total_votos = df_filtrado[voto_selecionado].sum()
+        total_aptos = df_filtrado['VOTOS APTOS'].sum()
+        percentual_total = (total_votos / total_aptos * 100) if total_aptos > 0 else 0
         
-        # Extrair coordenadas X e Y da geometria
-        df_filtrado = df_filtrado.copy()  # Evita SettingWithCopyWarning
-        df_filtrado['lon'] = df_filtrado.geometry.x
-        df_filtrado['lat'] = df_filtrado.geometry.y
+        col1, col2, col3 = st.columns(3)
         
-        # Garantir que a coluna selecionada existe e é numérica
-        if voto_selecionado not in df_filtrado.columns:
-            st.error(f"A coluna '{voto_selecionado}' não existe nos dados.")
-        elif not pd.api.types.is_numeric_dtype(df_filtrado[voto_selecionado]):
-            st.error(f"A coluna '{voto_selecionado}' não é numérica.")
-        else:
-            # Definir a camada do mapa
+        col1.metric("Total de Votos", f"{total_votos}")
+        if modo_visualizacao == "Proporção (%)":
+            col2.metric("Proporção Total (%)", f"{percentual_total:.2f}%")
+        col3.metric("Votos Aptos", f"{total_aptos}")
+    
+    # Container para Mapas e Legendas
+    with st.container():
+        col1, col2 = st.columns([3, 1])  # Mapa ocupa mais espaço que a legenda
+        with col1:
+            # 13. Criação do Mapa Interativo
+            st.subheader("Mapa das Localidades de Votação")
+            
+            # Extrair coordenadas X e Y da geometria
+            df_filtrado = df_filtrado.copy()  # Evita SettingWithCopyWarning
+            df_filtrado['lon'] = df_filtrado.geometry.x
+            df_filtrado['lat'] = df_filtrado.geometry.y
+            
+            # Definir a camada do mapa com cores dinâmicas
             layer = pdk.Layer(
                 "ScatterplotLayer",
                 data=df_filtrado,
                 get_position='[lon, lat]',
-                get_fill_color=cor_selecionada + [180],  # Adicionar transparência
+                get_fill_color='color',
                 get_line_color=[0, 0, 0],  # Bordas pretas
-                line_width_min_pixels=50,
+                get_line_width= 10,
                 get_radius="radius",
                 pickable=True,
                 auto_highlight=True
             )
         
-            # Configuração do estado inicial do mapa
+            # Definir o estilo do mapa base
+            map_style = "mapbox://styles/mapbox/light-v10"  # Altere conforme desejado
+            # Outros exemplos: "mapbox://styles/mapbox/dark-v10", "mapbox://styles/mapbox/streets-v11", "mapbox://styles/mapbox/satellite-streets-v11"
+        
+            # Configuração do estado inicial do mapa com zoom fixo
             if not df_filtrado.empty:
                 midpoint = (df_filtrado['lon'].mean(), df_filtrado['lat'].mean())
             else:
                 midpoint = (-49.2733, -25.4284)  # Coordenadas de Curitiba
-        
+    
             view_state = pdk.ViewState(
                 longitude=midpoint[0],
                 latitude=midpoint[1],
-                zoom=10,
+                zoom=10,  # Zoom fixo para manter a proporcionalidade
                 pitch=0
             )
         
@@ -215,6 +384,7 @@ else:
             r = pdk.Deck(
                 layers=[layer],
                 initial_view_state=view_state,
+                map_style=map_style,  # Aplicar o estilo do mapa
                 tooltip={
                     "html": f"Zona: {{zona_eleitoral}}<br/>Local: {{local_votacao}}<br/>{titulo_valor}: {{{valor_exibido}}}",
                     "style": {"backgroundColor": "steelblue", "color": "white"}
@@ -222,23 +392,45 @@ else:
             )
         
             st.pydeck_chart(r)
+        
         with col2:
-           # 11. Tabela Dinâmica
-            st.subheader(f"Dados das Localidades de Votação - {titulo_valor}")
+            st.markdown("### Legenda")
+            # Legenda para o tipo de voto/candidato
+            legenda_cor = f"""
+            <div style="display: flex; align-items: center; margin-bottom:10px;">
+                <div style="
+                    width: 20px;
+                    height: 20px;
+                    background-color: rgba(0, 80, 180, 0.7);
+                    border: 1px solid #000;
+                    border-radius: 50%;
+                    margin-right: 10px;
+                "></div>
+                <div>{voto_selecionado}</div>
+            </div>
+            """
+            # Legenda para o tamanho das bolinhas
+            st.markdown(legenda_cor + legenda_tamanho, unsafe_allow_html=True)
             
-            colunas_exibir = ['zon_loc', 'zona_eleitoral', 'local_votacao', valor_exibido, 'BAIRRO']
-            st.dataframe(df_filtrado[colunas_exibir].reset_index(drop=True))
-
-    # 9. Organizar o Layout em Colunas
-    col1, col2 = st.columns(2)
+            # Nota sobre o zoom fixo
+            st.markdown("""
+                <div style="margin-top:10px; font-size:12px;">
+                    <i>Nota: A legenda de tamanho das bolinhas é baseada no nível de zoom 11 do mapa.</i>
+                </div>
+            """, unsafe_allow_html=True)
     
-    with col1:
+    # Container para Gráficos
+    with st.container():
+        # Gráfico de Barras por Bairro
         st.subheader("Distribuição dos Votos por Bairro")
         st.altair_chart(grafico_barras, use_container_width=True)
+        
+        # Gráfico de Distribuição de Locais por Faixa de Valores
+        st.subheader("Distribuição de Número de Locais de Votação por Faixa de Valores")
+        st.altair_chart(grafico_distribuicao, use_container_width=True)
     
-    with col2:
-        st.subheader("Proporção dos votos por Bairro")
-        st.plotly_chart(grafico_pizza, use_container_width=True)
-    
-    
-    
+    # Container para Tabela Dinâmica
+    with st.container():
+        st.subheader(f"Dados das Localidades de Votação - {titulo_valor}")
+        colunas_exibir = ['zona_eleitoral', 'local_votacao', valor_exibido, 'BAIRRO']
+        st.dataframe(df_filtrado[colunas_exibir].reset_index(drop=True))
