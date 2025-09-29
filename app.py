@@ -364,7 +364,7 @@ else:
             )
         
             # Definir o estilo do mapa base
-            map_style = "mapbox://styles/mapbox/light-v10"  # Altere conforme desejado
+            map_style = "light"  # Altere conforme desejado
             # Outros exemplos: "mapbox://styles/mapbox/dark-v10", "mapbox://styles/mapbox/streets-v11", "mapbox://styles/mapbox/satellite-streets-v11"
         
             # Configuração do estado inicial do mapa com zoom fixo
